@@ -22,7 +22,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from crackweb_mcp import tools  # noqa: E402
-from crackweb_mcp.proxy import Registry  # noqa: E402
+from crackweb_mcp.crackweb import RequestOptions, Target  # noqa: E402
+from crackweb_mcp.processes import Registry  # noqa: E402
 
 FINDING_WAIT_S = 90
 
@@ -48,6 +49,22 @@ class Target(http.server.BaseHTTPRequestHandler):
         pass
 
 
+def signed_token(claims: dict, secret: str) -> str:
+    """An HS256 token, signed here: what a target's session cookie might hold."""
+    import base64
+    import hashlib
+    import hmac
+    import json as _json
+
+    def part(value: object) -> str:
+        raw = _json.dumps(value, separators=(",", ":")).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    body = f"{part({'alg': 'HS256', 'typ': 'JWT'})}.{part(claims)}"
+    signature = hmac.new(secret.encode(), body.encode(), hashlib.sha256).digest()
+    return body + "." + base64.urlsafe_b64encode(signature).decode().rstrip("=")
+
+
 def main(argv: list[str]) -> int:
     if argv:
         os.environ["CRACKWEB_BIN"] = argv[0]
@@ -62,7 +79,7 @@ def main(argv: list[str]) -> int:
     registry = Registry(idle=0)
     findings: list[dict] = []
     try:
-        started = tools.start_proxy(registry, scope=["127.0.0.1"])
+        started = tools.start_proxy(registry, ["127.0.0.1"], RequestOptions())
         print(f"proxy {started['proxy_id']} listening on {started['listen']}")
 
         curl = subprocess.run(
@@ -105,6 +122,16 @@ def main(argv: list[str]) -> int:
         print("no findings appeared: the proxy ran but nothing was reported")
         return 1
     print(f"ok: {len(findings)} finding(s) through the proxy")
+
+    # The offline side, with the same binary: sign a token here, and let crackweb say what it
+    # is and recover the key. Nothing is sent anywhere, so this needs no target at all.
+    token = signed_token({"sub": "admin", "role": "admin"}, "hunter2")
+    decoded = tools.local_jwt(Registry(idle=0), token, secret="hunter2")
+    print("offline: crackweb read the token back as")
+    print("  " + decoded["stdout"].replace("\n", "\n  "))
+    if "admin" not in decoded["stdout"]:
+        print("the token's claims did not come back")
+        return 1
     return 0
 
 

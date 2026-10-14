@@ -26,6 +26,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from . import logs
+
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 SEVERITIES = ("Critical", "High", "Medium", "Low", "Info")
 # The trailing token has to look like a check id, which is what keeps an ordinary line that
@@ -95,33 +97,13 @@ def parse(text: str) -> list[dict]:
 def read_since(path: str | Path, offset: int = 0) -> tuple[list[dict], int]:
     """Findings that arrived since `offset` bytes, and the offset to use next time.
 
-    A file that shrank has been replaced or truncated, so the offset no longer means
-    anything and reading starts over. A replacement of the same size or larger is not
-    detected — nothing writes these logs but the process that owns them, in a directory of
-    its own. A file whose last line has no newline yet is left alone: the writer is
-    mid-line, and half a finding parses as nothing.
+    The reading itself — whole lines only, and starting over when the file shrank — is
+    `logs.read_text_since`, which the out-of-band listener's reader uses too.
     """
-    log = Path(path)
-    if not log.exists():
-        return [], offset
-
-    size = log.stat().st_size
-    if size < offset:
-        offset = 0
-
-    with log.open("rb") as handle:
-        handle.seek(offset)
-        chunk = handle.read()
-
-    complete = chunk
-    if chunk and not chunk.endswith(b"\n"):
-        cut = chunk.rfind(b"\n")
-        complete = chunk[: cut + 1] if cut != -1 else b""
-
-    new_offset = offset + len(complete)
-    if not complete:
+    text, new_offset = logs.read_text_since(path, offset)
+    if not text:
         return [], new_offset
-    return parse(complete.decode("utf-8", "replace")), new_offset
+    return parse(text), new_offset
 
 
 def read_all(path: str | Path) -> tuple[list[dict], int]:

@@ -16,19 +16,34 @@ for a person.
 | Tool | What it does |
 | --- | --- |
 | `list_checks` | Every check the installed binary offers: id, severity, tags, and whether it is opt-in. |
-| `scan` | Test one URL once; returns the report's findings and what the CLI said on stderr. |
+| `scan` | Test one request once; returns the report's findings and what the CLI said on stderr. |
 | `crawl` | Discover a target's pages and test them — usually the first call against a site. |
 | `start_proxy` | Start an intercepting proxy and return its address. **Scope is required.** |
 | `proxy_status` | Findings confirmed since your cursor, and whether the proxy is still running. |
 | `stop_proxy` | Stop the proxy and return everything it found. Safe to call twice. |
+| `start_oob` | Start an out-of-band listener, for the vulnerabilities that are only provable by a callback. |
+| `oob_status` | Callbacks collected since your cursor: when, over which protocol, from where, and which injection caused them. |
+| `stop_oob` | Stop the listener and return every callback it collected. |
+| `local_jwt` | Offline: decode a JSON Web Token, recover its signing key, and sign one of your own. Nothing is sent. |
+| `local_hash` | Offline: identify a hash and try to recover what it was made from. |
+| `ca` | Load or generate the interception certificate authority, and say what it is. |
 
-Every result also carries `proxies`: what is running, and how many findings are waiting
-after your cursor. A caller that never thinks to ask still sees that something was found.
+Every flag the corresponding command takes is a parameter of these tools. The scanning ones —
+`scan`, `crawl`, `start_proxy` — share one set: `checks`, `enable_unsafe`, `sessions`,
+`cookies`, `headers`, `basic_auth`, `jwt_secrets`, `proxy`, `request_timeout`, `rate`,
+`threads`, `sensitivity`, `insecure`, `user_agent`, `random_ua`, `templates`, `skip_params`,
+`no_normalize`, `verbose`, `no_waf`, `no_assume_waf`, the five `oob_*` addresses,
+`report_path`, and `timeout_s` for the call itself. `crawl` adds `depth`, `engine`,
+`max_pages`, `scope`, `api_docs`, `no_discovery` and `allow_state_change`; `start_proxy` adds
+`listen`, `upstream`, `passive_only` and `export_ca`.
+
+Every result also carries `processes`: what is running, and how much is waiting after your
+cursor. A caller that never thinks to ask still sees that something arrived.
 
 ## Install
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.2.1
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.0
 # from a checkout:
 pip install .
 ```
@@ -80,14 +95,16 @@ Notes on the pieces that are decisions rather than mechanics:
 - **`scope` is required.** It is the list of host patterns the proxy may intercept;
   everything else is tunnelled untouched. A default here would be intrusive rather than
   merely wrong, so there is none.
-- **The cursor is monotonic and only `proxy_status` moves it.** Calling status twice
-  returns nothing twice; omitting the cursor continues from the last read. Every other
-  tool's `proxies` field reports how much is *waiting* without consuming it. `stop_proxy`
-  hands everything over at once and moves the cursor to the end, so a proxy that has been
-  stopped and read stops appearing in other results.
+- **The cursor is monotonic and only a status call moves it.** Calling status twice returns
+  nothing twice; omitting the cursor continues from the last read. Every other tool's
+  `processes` field reports how much is *waiting* without consuming it — for a proxy that is
+  findings, for the out-of-band listener that is callbacks. Stopping hands everything over at
+  once and moves the cursor to the end, so a process that has been stopped and read stops
+  appearing in other results.
 - **The proxy dies with this server**, and an idle one is stopped on its own
   (`CRACKWEB_MCP_IDLE_TIMEOUT`, default 30 minutes, `0` disables). An agent will not
-  remember to stop a proxy, so nothing depends on it remembering.
+  remember to stop a proxy, so nothing depends on it remembering. The out-of-band listener is
+  held the same way.
 - **Opt-in checks need `enable_unsafe=True`.** These run page scripts or write to a shared
   cache; `list_checks` marks them, and the wrapper never turns them on by itself.
 
@@ -114,7 +131,7 @@ Two consequences worth knowing:
 | Variable | Meaning |
 | --- | --- |
 | `CRACKWEB_BIN` | The crackweb binary. Falls back to `PATH`. |
-| `CRACKWEB_MCP_IDLE_TIMEOUT` | Seconds before an untouched proxy is stopped. Default `1800`, `0` disables. |
+| `CRACKWEB_MCP_IDLE_TIMEOUT` | Seconds before an untouched process is stopped. Default `1800`, `0` disables. |
 | `CRACKWEB_MCP_TMP` | Where a run's logs live. Default: the system temp directory. |
 
 ## Development

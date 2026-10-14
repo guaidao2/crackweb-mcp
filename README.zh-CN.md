@@ -13,18 +13,26 @@
 | 工具 | 作用 |
 | --- | --- |
 | `list_checks` | 当前二进制里有哪些检查：id、判级、标签、是否 opt-in |
-| `scan` | 对单个 URL 扫一次，返回报表里的 findings 与 CLI 的 stderr |
+| `scan` | 对单个请求测一次，返回报表里的 findings 与 CLI 的 stderr |
 | `crawl` | 先发现页面再扫描 —— 对站点通常第一步就用它 |
 | `start_proxy` | 起一个拦截代理并返回地址。**`scope` 必填** |
 | `proxy_status` | 返回游标之后确认的 findings，以及代理是否还在跑 |
 | `stop_proxy` | 停止代理并交出它找到的全部内容，幂等 |
+| `start_oob` | 起一个带外监听，给那些只有"目标回调过来"才能证明的漏洞用 |
+| `oob_status` | 返回游标之后收到的回调：时间、协议、来源，以及是哪次注入引起的 |
+| `stop_oob` | 停止监听并交出它收到的全部回调 |
+| `local_jwt` | 离线：解码 JWT、恢复签名密钥、用你的密钥再造一个 token。不发任何流量 |
+| `local_hash` | 离线：识别一个 hash，并在可能时还原出原文 |
+| `ca` | 加载或生成拦截用的 CA，并说明它是什么 |
 
-每个返回值还都带 `proxies`：现在有什么在跑、你游标之后还等着多少条 findings —— 即使调用方从没想过要问，也能看到"有东西出来了"。
+对应命令的**每一个 flag 都是这些工具的参数**。扫描类（`scan` / `crawl` / `start_proxy`）共用一组：`checks`、`enable_unsafe`、`sessions`、`cookies`、`headers`、`basic_auth`、`jwt_secrets`、`proxy`、`request_timeout`、`rate`、`threads`、`sensitivity`、`insecure`、`user_agent`、`random_ua`、`templates`、`skip_params`、`no_normalize`、`verbose`、`no_waf`、`no_assume_waf`、五个 `oob_*` 地址、`report_path`，以及 `timeout_s`（这一次工具调用最多等多久）。`crawl` 另有 `depth`、`engine`、`max_pages`、`scope`、`api_docs`、`no_discovery`、`allow_state_change`；`start_proxy` 另有 `listen`、`upstream`、`passive_only`、`export_ca`。
+
+每个返回值还都带 `processes`：现在有什么在跑、你游标之后还等着多少 —— 即使调用方从没想过要问，也能看到"有东西出来了"。
 
 ## 安装
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.2.1
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.0
 # 或者从检出的代码装：
 pip install .
 ```
@@ -68,8 +76,8 @@ crackweb 测的是经过它代理的流量，所以用法是一个循环：
 几条"是决定、不是机制"的说明：
 
 - **`scope` 必填。** 它决定代理能拦截哪些主机，其余一律原样透传。这里给默认值会变成"擅自动手"，而不是"仅仅做错"，所以没有默认值。
-- **游标单调，且只有 `proxy_status` 会推进它。** 连猜两次不会重复给；不传游标就从上次读完的地方继续。别的工具的 `proxies` 字段只报"还有多少待读"，不消耗游标。`stop_proxy` 一次性交出全部内容并把游标推到末尾，所以"已停且已读完"的代理不会再出现在别的结果里。
-- **代理随本 server 一同退出**，闲置的会自己停（`CRACKWEB_MCP_IDLE_TIMEOUT`，默认 30 分钟，`0` 关闭）。agent 不会记得停代理，所以没有一件事指望它记得。
+- **游标单调，且只有 status 调用会推进它。** 连猜两次不会重复给；不传游标就从上次读完的地方继续。别的工具的 `processes` 字段只报"还有多少待读"而不消耗游标 —— 代理是 findings，带外监听是回调。停止会一次性交出全部内容并把游标推到末尾，所以"已停且已读完"的进程不会再出现在别的结果里。
+- **代理随本 server 一同退出**，闲置的会自己停（`CRACKWEB_MCP_IDLE_TIMEOUT`，默认 30 分钟，`0` 关闭）。agent 不会记得停代理，所以没有一件事指望它记得；带外监听同此。
 - **opt-in 检查需要显式 `enable_unsafe=True`。** 它们会执行页面脚本或写共享缓存；`list_checks` 会把它们标出来，wrapper 不会自己打开。
 
 ### findings 是从哪来的

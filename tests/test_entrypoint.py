@@ -26,6 +26,12 @@ EXPECTED_TOOLS = {
     "start_proxy",
     "proxy_status",
     "stop_proxy",
+    "start_oob",
+    "oob_status",
+    "stop_oob",
+    "local_jwt",
+    "local_hash",
+    "ca",
 }
 
 

@@ -1,21 +1,22 @@
 """The tools, as plain functions.
 
-The MCP layer only names these and describes them; the work lives here so it can be
-tested without a protocol in the way.
+The MCP layer only names these and describes them; the work lives here so it can be tested
+without a protocol in the way.
 
-Every result carries `proxies`: what is running, and how much sits after the caller's
-cursor. That is the one place a caller that never asks learns that something was found,
-and it costs a read of a file.
+Every result carries `processes`: what is running, and how much sits after the caller's
+cursor. That is the one place a caller that never asks learns that something arrived, and it
+costs a read of a file.
 """
 
 from __future__ import annotations
 
 from . import crackweb
-from .proxy import Registry
+from .crackweb import RequestOptions, Target
+from .processes import Registry
 
 
 def _with_state(registry: Registry, result: dict) -> dict:
-    result["proxies"] = registry.summary()
+    result["processes"] = registry.summary()
     return result
 
 
@@ -26,39 +27,40 @@ def list_checks(registry: Registry) -> dict:
 
 def scan(
     registry: Registry,
-    url: str,
-    checks: object = None,
-    enable_unsafe: bool = False,
+    target: Target,
+    options: RequestOptions,
     timeout_s: float | None = None,
 ) -> dict:
-    """One target, scanned once, and the findings it produced."""
+    """One request, tested once, and the findings it produced."""
     return _with_state(
-        registry,
-        crackweb.one_shot(
-            "scan",
-            url,
-            checks=checks,
-            enable_unsafe=enable_unsafe,
-            timeout=timeout_s or crackweb.DEFAULT_TIMEOUT,
-        ),
+        registry, crackweb.scan(options, target, timeout=timeout_s or crackweb.DEFAULT_TIMEOUT)
     )
 
 
 def crawl(
     registry: Registry,
-    url: str,
-    checks: object = None,
-    enable_unsafe: bool = False,
+    target: Target,
+    options: RequestOptions,
+    depth: int | None = None,
+    engine: str | None = None,
+    max_pages: int | None = None,
+    scope: object = None,
+    no_discovery: bool = False,
+    allow_state_change: bool = False,
     timeout_s: float | None = None,
 ) -> dict:
-    """One target, discovered and then scanned: what a person would run first."""
+    """A target discovered and then tested: what a person would run first."""
     return _with_state(
         registry,
-        crackweb.one_shot(
-            "crawl",
-            url,
-            checks=checks,
-            enable_unsafe=enable_unsafe,
+        crackweb.crawl(
+            options,
+            target,
+            depth=depth,
+            engine=engine,
+            max_pages=max_pages,
+            scope=scope,
+            no_discovery=no_discovery,
+            allow_state_change=allow_state_change,
             timeout=timeout_s or crackweb.DEFAULT_TIMEOUT,
         ),
     )
@@ -67,35 +69,38 @@ def crawl(
 def start_proxy(
     registry: Registry,
     scope: object,
+    options: RequestOptions,
     listen: str | None = None,
     upstream: str | None = None,
-    checks: object = None,
     passive_only: bool = False,
-    enable_unsafe: bool = False,
+    export_ca: str | None = None,
 ) -> dict:
     """Start an intercepting proxy for traffic the caller sends through it."""
     patterns = [scope] if isinstance(scope, str) else list(scope or [])
-    proxy = registry.start(
+    entry = registry.start_proxy(
+        options,
         scope=patterns,
         listen=listen,
         upstream=upstream,
-        checks=checks,
         passive_only=passive_only,
-        enable_unsafe=enable_unsafe,
+        export_ca=export_ca,
     )
-    result = {
-        "proxy_id": proxy.id,
-        "listen": proxy.listen,
-        "scope": proxy.scope,
-        "running": proxy.running,
-        "findings_log": str(proxy.findings_log),
-        "report_path": str(proxy.report_path),
-        "next_step": (
-            f"point the tool that generates traffic at http://{proxy.listen} as its "
-            f"HTTP proxy, then ask proxy_status for findings"
-        ),
-    }
-    return _with_state(registry, result)
+    return _with_state(
+        registry,
+        {
+            "kind": entry.kind,
+            "proxy_id": entry.id,
+            "listen": entry.listen,
+            "scope": entry.scope,
+            "running": entry.running,
+            "log": str(entry.log),
+            "report_path": str(entry.report_path),
+            "next_step": (
+                f"point the tool that generates traffic at http://{entry.listen} as its "
+                f"HTTP proxy, then ask proxy_status for findings"
+            ),
+        },
+    )
 
 
 def proxy_status(registry: Registry, proxy_id: str, cursor: int | None = None) -> dict:
@@ -104,5 +109,71 @@ def proxy_status(registry: Registry, proxy_id: str, cursor: int | None = None) -
 
 
 def stop_proxy(registry: Registry, proxy_id: str, include_report: bool = False) -> dict:
-    """Stop a proxy and return everything it found."""
+    """Stop the proxy and return everything it found."""
     return _with_state(registry, registry.stop(proxy_id, include_report=include_report))
+
+
+def start_oob(
+    registry: Registry,
+    http: str | None = None,
+    dns: str | None = None,
+    token: str | None = None,
+    domain: str | None = None,
+) -> dict:
+    """Start the out-of-band listener, which collects callbacks from the target."""
+    entry = registry.start_oob(http=http, dns=dns, token=token, domain=domain)
+    return _with_state(
+        registry,
+        {
+            "kind": entry.kind,
+            "oob_id": entry.id,
+            "listen": entry.listen,
+            "callback_url": registry.status(entry.id)["listening"].get("callback_url", ""),
+            "running": entry.running,
+            "log": str(entry.log),
+            "next_step": (
+                "pass these addresses to scan or crawl as oob_http and oob_dns, then ask "
+                "oob_status for the callbacks a check provokes"
+            ),
+        },
+    )
+
+
+def oob_status(registry: Registry, oob_id: str, cursor: int | None = None) -> dict:
+    """Callbacks collected since the cursor, as the listener runs."""
+    return _with_state(registry, registry.status(oob_id, cursor))
+
+
+def stop_oob(registry: Registry, oob_id: str) -> dict:
+    """Stop the listener and return every callback it collected."""
+    return _with_state(registry, registry.stop(oob_id))
+
+
+def local_jwt(
+    registry: Registry,
+    token: str,
+    secret: str | None = None,
+    wordlist: str | None = None,
+    forge: bool = False,
+    claims: object = None,
+) -> dict:
+    """Decode a token offline, recover its signing secret, and sign one of its own."""
+    return _with_state(
+        registry,
+        crackweb.local_jwt(token, secret=secret, wordlist=wordlist, forge=forge, claims=claims),
+    )
+
+
+def local_hash(registry: Registry, value: str, wordlist: str | None = None) -> dict:
+    """Identify a hash offline and try to recover what it was made from."""
+    return _with_state(registry, crackweb.local_hash(value, wordlist=wordlist))
+
+
+def ca(
+    registry: Registry,
+    out_dir: str | None = None,
+    force: bool = False,
+    export: str | None = None,
+) -> dict:
+    """Load or generate the interception CA, and say what it is."""
+    return _with_state(registry, crackweb.ca(out_dir=out_dir, force=force, export=export))
