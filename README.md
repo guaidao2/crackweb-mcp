@@ -33,6 +33,23 @@ pip install .
 Needs Python 3.10+, an MCP client, and a crackweb binary (v1.6.8 or later). `mcp` is the
 only dependency. Point at the binary with `CRACKWEB_BIN`, or put `crackweb` on `PATH`.
 
+### Running it without installing anything
+
+On a distribution Python that refuses `pip install .` — PEP 668, which is Kali, Debian and
+Ubuntu by default — or anywhere a checkout is simpler than an install, the server runs
+straight from the tree:
+
+```sh
+git clone https://github.com/guaidao2/crackweb-mcp
+cd crackweb-mcp
+python3 server.py /path/to/crackweb
+```
+
+It is the same server: it puts `src/` on the import path, points `CRACKWEB_BIN` at the
+binary you named, and speaks MCP over stdio. The dependency is still the MCP SDK, and if it
+is not importable the script says exactly how to get it — including the route that leaves
+the system Python alone.
+
 ## Point a client at it
 
 ```json
@@ -136,7 +153,7 @@ building, parsing, cursors, process lifetime — is tested against real processe
 
 **findings 从哪来**：crackweb 没有运行期查询接口（报表是退出时写的），所以外壳把"每条 finding 确认时打印的那一行"重定向到文件，`proxy_status` 读这个文件 —— 这就是为什么代理还在跑就能查、而且 finding 一确认就能看到。两点要知道：流里的 finding 带 severity/title/检查名/URL/方法/参数与 payload，完整的证据（响应片段、对照基线）在退出后的报表里；**Windows 上报表可能没有** —— crackweb 只在正常退出路径上写报表，而 Windows 上停进程时它跑不到任何代码，返回值会明确给出 `report_written: false` 与 `report_note`，findings 本身不受影响（来自流）。
 
-安装：`pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.1.0`，需要 Python 3.10+ 与一个 crackweb 二进制（v1.6.8 以上），依赖只有 `mcp`。
+安装：`pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.1.0`，需要 Python 3.10+ 与一个 crackweb 二进制（v1.6.8 以上），依赖只有 `mcp`。**不想安装也可以**：发行版 Python 因为 PEP 668 会拒绝 `pip install .`（Kali / Debian / Ubuntu 默认如此），那就直接 `git clone` 后 `python3 server.py /path/to/crackweb` —— 同一个 server，脚本替你挂好 `src/` 并设好二进制路径；缺 MCP SDK 时它会把补救命令（含不动系统 Python 的那种）直接打出来。
 
 ## License
 
