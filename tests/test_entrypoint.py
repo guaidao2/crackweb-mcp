@@ -1,4 +1,4 @@
-"""The checkout entry point: no install, one script, a real stdio handshake.
+"""The checkout entry point: no install, one script, a real stdio exchange.
 
 The handshake and the tool list are protocol-level, so they exercise the whole wiring —
 path setup, binary resolution, the server, and the encoding of what goes out — without
@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -26,74 +28,121 @@ EXPECTED_TOOLS = {
     "stop_proxy",
 }
 
-HANDSHAKE = [
-    {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "0"},
-        },
-    },
-    {"jsonrpc": "2.0", "method": "notifications/initialized"},
-    {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-]
 
+class Session:
+    """A client that talks the way a client does: one message, then its reply.
 
-def run_server(binary: str | None = None, pythonioencoding: str | None = None):
-    """Speak the handshake and hand back the raw streams.
-
-    Bytes rather than text: stdout has to be UTF-8 whatever the machine's code page is, and
-    that is worth asserting instead of decoding leniently.
+    Writing the whole exchange at once and closing stdin lets the server leave before it has
+    answered the last request — a race the test has no business being in, and one that made
+    the suite fail on exactly one of eight CI jobs.
     """
-    env = dict(os.environ)
-    env.pop("PYTHONIOENCODING", None)
-    if pythonioencoding is not None:
-        env["PYTHONIOENCODING"] = pythonioencoding
-    body = "\n".join(json.dumps(line) for line in HANDSHAKE) + "\n"
-    return subprocess.run(
-        [sys.executable, str(SCRIPT), binary or str(FAKE)],
-        input=body.encode(),
-        capture_output=True,
-        env=env,
-        timeout=120,
+
+    def __init__(self, binary: str | None = None, pythonioencoding: str | None = None) -> None:
+        env = dict(os.environ)
+        env.pop("PYTHONIOENCODING", None)
+        if pythonioencoding is not None:
+            env["PYTHONIOENCODING"] = pythonioencoding
+        self.replies: queue.Queue[bytes] = queue.Queue()
+        self.stderr: list[bytes] = []
+        self.missing = AssertionError("no reply")
+        self.process = subprocess.Popen(
+            [sys.executable, str(SCRIPT), binary or str(FAKE)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        threading.Thread(target=self._pump, args=(self.process.stdout, self.replies), daemon=True).start()
+        threading.Thread(target=self._pump, args=(self.process.stderr, None), daemon=True).start()
+
+    def _pump(self, stream: object, into: queue.Queue[bytes] | None) -> None:
+        for line in stream:  # type: ignore[union-attr]
+            if into is None:
+                self.stderr.append(line)
+            else:
+                into.put(line)
+
+    def stderr_text(self) -> str:
+        return b"".join(self.stderr).decode("utf-8", "replace")
+
+    def send(self, message: dict) -> None:
+        assert self.process.stdin is not None
+        self.process.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
+        self.process.stdin.flush()
+
+    def reply(self, wanted: int, timeout: float = 30.0) -> dict:
+        """The reply with this id, or a failure that says what the server did say."""
+        try:
+            while True:
+                line = self.replies.get(timeout=timeout)
+                text = line.decode("utf-8")  # strict: this is the protocol's encoding
+                if not text.lstrip().startswith("{"):
+                    continue
+                message = json.loads(text)
+                if message.get("id") == wanted:
+                    return message
+        except queue.Empty:
+            raise AssertionError(
+                f"no reply to {wanted}; exit code {self.process.poll()}, stderr:\n"
+                f"{self.stderr_text()[-800:]}"
+            )
+
+    def close(self) -> int:
+        if self.process.stdin is not None and not self.process.stdin.closed:
+            self.process.stdin.close()
+        return self.process.wait(timeout=30)
+
+    def kill_if_running(self) -> None:
+        if self.process.poll() is None:
+            self.process.kill()
+
+
+def handshake(session: Session) -> dict:
+    """initialize, then tools/list, then hand back the tool list."""
+    session.send(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0"},
+            },
+        }
     )
+    initialized = session.reply(1)
+    assert initialized["result"]["serverInfo"]["name"] == "crackweb"
 
-
-def replies_of(done: subprocess.CompletedProcess[bytes]) -> dict[int, dict]:
-    stdout = done.stdout.decode("utf-8")  # strict: this is the protocol's encoding
-    return {
-        json.loads(line)["id"]: json.loads(line)
-        for line in stdout.splitlines()
-        if line.strip().startswith("{") and '"id"' in line
-    }
+    session.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    session.send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    return session.reply(2)["result"]
 
 
 def test_the_script_answers_the_handshake_and_lists_the_tools() -> None:
-    done = run_server()
-    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
-
-    replies = replies_of(done)
-    assert 1 in replies and 2 in replies
-    assert replies[1]["result"]["serverInfo"]["name"] == "crackweb"
-    tools = replies[2]["result"]["tools"]
-    assert {tool["name"] for tool in tools} == EXPECTED_TOOLS
-    # A description is the contract a client reads, so every tool has one.
-    assert all(tool.get("description") for tool in tools)
+    session = Session()
+    try:
+        result = handshake(session)
+        tools = result["tools"]
+        assert {tool["name"] for tool in tools} == EXPECTED_TOOLS
+        # A description is the contract a client reads, so every tool has one.
+        assert all(tool.get("description") for tool in tools)
+        assert session.close() == 0
+    finally:
+        session.kill_if_running()
 
 
 def test_the_protocol_is_utf8_even_where_the_console_is_not() -> None:
     # Tool descriptions carry characters a legacy code page cannot represent. A stream that
     # encoded them its own way would hand the client a parse error rather than a tool list,
-    # so stdout is asserted to be UTF-8 while the child is told to use another encoding.
-    done = run_server(pythonioencoding="cp1252")
-    assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
-
-    replies = replies_of(done)
-    assert 2 in replies
-    assert any("—" in tool.get("description", "") for tool in replies[2]["result"]["tools"])
+    # so every line is decoded as UTF-8 while the child is told to use another encoding.
+    session = Session(pythonioencoding="cp1252")
+    try:
+        result = handshake(session)
+        assert any("—" in tool.get("description", "") for tool in result["tools"])
+        assert session.close() == 0
+    finally:
+        session.kill_if_running()
 
 
 def test_the_script_says_which_binary_is_missing(tmp_path: Path) -> None:
