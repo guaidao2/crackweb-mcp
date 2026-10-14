@@ -116,6 +116,7 @@ def list_checks(timeout: float = 120.0) -> dict:
     """Every check the binary knows, with the tags that select them."""
     done = run(["scan", "--list-checks"], timeout=timeout)
     checks: list[dict] = []
+    unparsed = 0
     for line in done.stdout.splitlines():
         row = LIST_CHECKS_ROW.match(line)
         if not row:
@@ -123,6 +124,8 @@ def list_checks(timeout: float = 120.0) -> dict:
         words = re.split(r"\s+", row.group("rest").strip())
         kind = next((w for w in words if w.lower() in KINDS), "")
         severity = next((w for w in words if w.lower() in SEVERITIES), "")
+        if not kind or not severity:
+            unparsed += 1
         opt_in = OPT_IN in words
         consumed = {kind, severity, OPT_IN} | {w for w in words if w.lower() in KINDS}
         tags_word = next((w for w in reversed(words) if w not in consumed), "")
@@ -137,7 +140,15 @@ def list_checks(timeout: float = 120.0) -> dict:
         )
     if not checks:
         raise CrackwebError(f"could not read the check list: {tail(done.stderr or done.stdout)}")
-    return {"checks": checks, "count": len(checks)}
+    result: dict = {"checks": checks, "count": len(checks)}
+    if unparsed:
+        # A column that moved — or output that is not the shape this reads — would otherwise
+        # show up as rows with blanks in them and nothing else to say what happened.
+        result["warnings"] = [
+            f"{unparsed} of {len(checks)} rows carried no kind and severity this parser "
+            f"recognises; --list-checks may not be the shape it expects"
+        ]
+    return result
 
 
 def one_shot(

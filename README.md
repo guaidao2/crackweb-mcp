@@ -66,7 +66,9 @@ Notes on the pieces that are decisions rather than mechanics:
   merely wrong, so there is none.
 - **The cursor is monotonic and only `proxy_status` moves it.** Calling status twice
   returns nothing twice; omitting the cursor continues from the last read. Every other
-  tool's `proxies` field reports how much is *waiting* without consuming it.
+  tool's `proxies` field reports how much is *waiting* without consuming it. `stop_proxy`
+  hands everything over at once and moves the cursor to the end, so a proxy that has been
+  stopped and read stops appearing in other results.
 - **The proxy dies with this server**, and an idle one is stopped on its own
   (`CRACKWEB_MCP_IDLE_TIMEOUT`, default 30 minutes, `0` disables). An agent will not
   remember to stop a proxy, so nothing depends on it remembering.
@@ -118,6 +120,9 @@ building, parsing, cursors, process lifetime — is tested against real processe
   `proxy_status` polling for anything long.
 - Checks are not reimplemented here in any form, so anything crackweb cannot do, these
   tools cannot do either.
+- If the server is killed outright — `SIGKILL`, or `TerminateProcess` on Windows — the
+  proxy it started outlives it: no code runs on that path, so nothing gets the chance to
+  stop it. Stop proxies normally, or check for a stray process after a hard kill.
 
 ## 简体中文
 

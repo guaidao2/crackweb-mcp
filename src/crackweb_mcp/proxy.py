@@ -214,9 +214,13 @@ class Registry:
         proxy = self._get(proxy_id)
         proxy.last_used = time.time()
 
-        offset = proxy.cursor if cursor is None else max(0, int(cursor))
-        new, offset = findings.read_since(proxy.findings_log, offset)
-        proxy.cursor = offset
+        started_at = proxy.cursor if cursor is None else max(0, int(cursor))
+        new, offset = findings.read_since(proxy.findings_log, started_at)
+        # A caller may hand back an older cursor; the stored one only ever moves forward.
+        proxy.cursor = max(proxy.cursor, offset)
+        # The total is read rather than counted: a status call is rare next to the findings
+        # it reports, and a cached counter has to be told about truncated logs and reused
+        # cursors — the read is right by construction, and this is not a hot loop.
         total = len(findings.read_all(proxy.findings_log)[0])
 
         result = {
@@ -248,7 +252,10 @@ class Registry:
 
         # The report is written on the way out, so it is read after the wait, and only
         # when the caller asked for it: it is much larger than the findings.
-        collected, _ = findings.read_all(proxy.findings_log)
+        collected, end = findings.read_all(proxy.findings_log)
+        # Everything has just been handed over, so the cursor goes to the end: a stopped
+        # proxy then stops appearing in other tools' results, having nothing left to say.
+        proxy.cursor = end
         result = {
             "proxy_id": proxy.id,
             "stopped": True,
@@ -262,15 +269,23 @@ class Registry:
             "report_written": proxy.report_path.exists(),
         }
         if not result["report_written"]:
-            # Saying why is more useful than a false. On Windows a stopped process runs no
-            # code at all, and the console break event this stops with is not one of the
-            # signals the proxy handles, so it never reaches the point of writing its
-            # report. The findings above come from the live stream and are complete.
-            result["report_note"] = (
-                "crackweb writes its report on the way out; this stop did not give it the "
-                "chance (on Windows a stopped process runs no code at all). The findings "
-                "above come from the live stream."
-            )
+            # Saying why is more useful than a false, and the reason differs by platform: on
+            # Windows a stopped process runs no code at all (the console break event this
+            # stops with is not one of the signals the proxy handles, so it never gets to the
+            # point of writing), while on POSIX the signal it handles was sent and it left
+            # before writing anyway. Either way the findings above come from the live stream
+            # and are complete.
+            if os.name == "nt":
+                result["report_note"] = (
+                    "crackweb writes its report on the way out, and a process stopped on "
+                    "Windows runs no code at all. The findings above come from the live "
+                    "stream."
+                )
+            else:
+                result["report_note"] = (
+                    "crackweb writes its report on the way out and did not get that far. "
+                    "The findings above come from the live stream."
+                )
         if include_report and proxy.report_path.exists():
             import json
 
@@ -282,19 +297,28 @@ class Registry:
     def summary(self) -> list[dict]:
         """A line per proxy for the result of any other tool.
 
-        This is how a caller that never thinks to ask learns that something was found:
-        the count is how much is waiting after its cursor, and reading is left to the
-        status call that means it.
+        This is how a caller that never thinks to ask learns that something was found: the
+        count is how much is waiting after its cursor, and reading is left to the status call
+        that means it. A proxy that has stopped and been read is left out — there is nothing
+        left to tell anyone about it.
+
+        The idle check runs here too, because this is the path every other tool takes: a
+        caller that only ever calls list_checks or scan is exactly the one whose proxy has to
+        stop itself.
         """
+        self._reap()
         out: list[dict] = []
         for proxy in self._proxies.values():
+            waiting = findings.count_since(proxy.findings_log, proxy.cursor)
+            if not proxy.running and waiting == 0:
+                continue
             out.append(
                 {
                     "proxy_id": proxy.id,
                     "running": proxy.running,
                     "listen": proxy.listen,
                     "findings_total": len(findings.read_all(proxy.findings_log)[0]),
-                    "new_findings_waiting": findings.count_since(proxy.findings_log, proxy.cursor),
+                    "new_findings_waiting": waiting,
                     "cursor": proxy.cursor,
                 }
             )

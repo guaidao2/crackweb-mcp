@@ -97,7 +97,10 @@ def run_proxy(argv: list[str]) -> int:
     scope = [argv[index + 1] for index, item in enumerate(argv) if item == "--scope"]
 
     def stop(*_args: object) -> None:
-        write_report(report_path, "proxy:" + ",".join(scope))
+        # FAKE_NO_REPORT stands in for a stop that gives the process no chance to write:
+        # what Windows does to a proxy that is being stopped.
+        if not os.environ.get("FAKE_NO_REPORT"):
+            write_report(report_path, "proxy:" + ",".join(scope))
         sys.exit(0)
 
     for name in ("SIGINT", "SIGTERM", "SIGBREAK"):

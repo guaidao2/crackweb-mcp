@@ -45,6 +45,29 @@ def test_two_findings_are_two_findings() -> None:
     assert parsed[1]["method"] == "POST"
 
 
+def test_a_header_this_reader_did_not_understand_does_not_donate_its_detail_lines() -> None:
+    # The line below is header-shaped but carries no check id, so it is not a finding — and
+    # the request under it is not the previous finding's either.
+    text = BLOCK + "[Medium] A header without a check id\n    POST http://example.com/other\n\n"
+    parsed = findings.parse(text)
+    assert len(parsed) == 1
+    assert parsed[0]["method"] == "GET"
+    assert parsed[0]["url"] == "http://example.com/swagger.json"
+
+
+def test_a_line_that_is_not_a_finding_ends_the_block_before_it() -> None:
+    text = BLOCK + "crackweb proxy listening on 127.0.0.1:7777\n    Param: not-this-finding\n"
+    parsed = findings.parse(text)
+    assert len(parsed) == 1
+    assert parsed[0]["fields"] == {"param": "q", "payload": "/swagger.json"}
+
+
+def test_a_severity_in_brackets_is_not_enough_on_its_own() -> None:
+    # What follows the two spaces has to look like a check id; a sentence does not.
+    assert findings.parse("[High] Something happened  See the README.\n") == []
+    assert len(findings.parse("[High] Something happened  exposed-path\n")) == 1
+
+
 def test_a_cursor_reads_forward_and_leaves_a_partial_line_alone(tmp_path: Path) -> None:
     log = tmp_path / "findings.log"
     log.write_text(BLOCK, encoding="utf-8")

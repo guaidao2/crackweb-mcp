@@ -28,8 +28,17 @@ from pathlib import Path
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 SEVERITIES = ("Critical", "High", "Medium", "Low", "Info")
+# The trailing token has to look like a check id, which is what keeps an ordinary line that
+# happens to carry a severity in brackets from being read as a finding. A note that mimics
+# the shape exactly would still get through — nothing in this stream distinguishes the two —
+# so the reader also closes a block at the first line that is not part of it.
+CHECK_ID = r"[a-z0-9][a-z0-9-]*"
 HEADER = re.compile(
-    r"^\[(?P<severity>" + "|".join(SEVERITIES) + r")\]\s+(?P<title>.+?)\s{2,}(?P<check>\S+)\s*$"
+    r"^\[(?P<severity>"
+    + "|".join(SEVERITIES)
+    + r")\]\s+(?P<title>.+?)\s{2,}(?P<check>"
+    + CHECK_ID
+    + r")\s*$"
 )
 METHOD_LINE = re.compile(r"^\s{2,}(?P<method>[A-Z]{3,7})\s+(?P<url>\S+)\s*$")
 FIELD_LINE = re.compile(r"^\s{2,}(?P<name>[A-Za-z][^:]{0,23}):\s?(?P<value>.*)$")
@@ -41,7 +50,14 @@ def strip_ansi(text: str) -> str:
 
 
 def parse(text: str) -> list[dict]:
-    """Turn a block of console output into findings."""
+    """Turn a block of console output into findings.
+
+    A finding is a header line and the indented lines that follow it, and the block ends at
+    the first line that is neither: a blank line, or a line that starts in column zero. That
+    matters more than it looks — everything the proxy prints besides findings lands between
+    blocks, and without the boundary the first such line after a finding would hand the
+    finding detail it never produced.
+    """
     findings: list[dict] = []
     current: dict | None = None
     for raw in strip_ansi(text).splitlines():
@@ -56,6 +72,12 @@ def parse(text: str) -> list[dict]:
                 "fields": {},
             }
             findings.append(current)
+            continue
+        if not raw.strip() or not raw[:1].isspace():
+            # A blank line, or something that is not indented: whatever it is, it is not
+            # this finding's. Closed rather than left open, so nothing can be attached to a
+            # finding that did not produce it.
+            current = None
             continue
         if current is None:
             continue
@@ -73,9 +95,11 @@ def parse(text: str) -> list[dict]:
 def read_since(path: str | Path, offset: int = 0) -> tuple[list[dict], int]:
     """Findings that arrived since `offset` bytes, and the offset to use next time.
 
-    A file that shrank means it was replaced or truncated, so the offset no longer
-    means anything and reading starts over. A file whose last line has no newline yet
-    is left alone: the writer is mid-line, and half a finding parses as nothing.
+    A file that shrank has been replaced or truncated, so the offset no longer means
+    anything and reading starts over. A replacement of the same size or larger is not
+    detected — nothing writes these logs but the process that owns them, in a directory of
+    its own. A file whose last line has no newline yet is left alone: the writer is
+    mid-line, and half a finding parses as nothing.
     """
     log = Path(path)
     if not log.exists():

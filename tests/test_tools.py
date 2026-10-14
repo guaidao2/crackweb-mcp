@@ -84,7 +84,37 @@ def test_the_proxy_lifecycle(fake_crackweb: object, registry: Registry) -> None:
     assert stopped["stopped"] is True
     assert stopped["finding_count"] == 2
     assert stopped["report_path"].endswith("report.json")
-    assert registry.summary()[0]["running"] is False
+    # Stopping hands everything over, so there is nothing left for other tools to report.
+    assert registry.summary() == []
+
+
+def test_a_proxy_nobody_asks_about_stops_itself(
+    fake_crackweb: object, tmp_path: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CRACKWEB_MCP_TMP", str(tmp_path / "idle"))
+    idle_registry = Registry(idle=0.2)
+    try:
+        started = tools.start_proxy(idle_registry, scope=["example.com"])
+        time.sleep(0.6)
+        # The idle check runs on the path every other tool takes, which is the path a caller
+        # that never asks about its proxy does take.
+        listed = tools.list_checks(idle_registry)["proxies"]
+        entry = next(p for p in listed if p["proxy_id"] == started["proxy_id"])
+        assert entry["running"] is False
+    finally:
+        idle_registry.stop_all()
+
+
+def test_a_missing_report_says_why_instead_of_pretending(
+    fake_crackweb: object, registry: Registry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_NO_REPORT", "1")
+    started = tools.start_proxy(registry, scope=["example.com"])
+    time.sleep(SETTLE)
+    stopped = tools.stop_proxy(registry, started["proxy_id"])
+    assert stopped["finding_count"] == 2  # the stream is the source, and it is complete
+    assert stopped["report_written"] is False
+    assert "report" in stopped["report_note"].lower()
 
 
 def test_another_tool_reports_what_is_waiting_without_consuming_it(
