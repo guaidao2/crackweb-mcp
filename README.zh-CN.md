@@ -24,7 +24,7 @@
 ## 安装
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.2.0
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.2.1
 # 或者从检出的代码装：
 pip install .
 ```

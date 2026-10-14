@@ -69,6 +69,10 @@ def main(argv: list[str]) -> int:
 
     from crackweb_mcp import crackweb, server
 
+    # The same UTF-8 the protocol needs, before anything is printed: a path on this machine
+    # is not ASCII, and a mangled message is worse than a short one.
+    server.force_utf8()
+
     # Finding the binary now, rather than on the first tool call, turns "forgot the path" into
     # a message at startup instead of a failure in the middle of a session.
     try:

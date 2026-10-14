@@ -28,7 +28,7 @@ after your cursor. A caller that never thinks to ask still sees that something w
 ## Install
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.2.0
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.2.1
 # from a checkout:
 pip install .
 ```

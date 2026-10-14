@@ -16,7 +16,10 @@ import os
 import signal
 import sys
 
-from mcp.server.fastmcp import FastMCP
+try:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as MCP_Server
+except ImportError:  # mcp 2.x renamed FastMCP to MCPServer, and kept the same shape
+    from mcp.server.mcpserver import MCPServer as MCP_Server
 
 from . import __version__, crackweb, tools
 from .proxy import Registry
@@ -31,10 +34,10 @@ INSTRUCTIONS = (
 )
 
 
-def build_server(registry: Registry | None = None) -> FastMCP:
+def build_server(registry: Registry | None = None) -> MCP_Server:
     """Wire the tools onto a server. One registry, so one place proxies live."""
     registry = registry or Registry()
-    server = FastMCP(name="crackweb", instructions=INSTRUCTIONS)
+    server = MCP_Server(name="crackweb", instructions=INSTRUCTIONS)
 
     @server.tool(
         name="list_checks",
@@ -151,8 +154,27 @@ def _install_signal_handlers(registry: Registry) -> None:
             pass
 
 
+def force_utf8() -> None:
+    """Speak UTF-8 whatever the console's code page is.
+
+    MCP is UTF-8 JSON on stdout. A Windows console defaults to a code page that cannot
+    represent some of what a tool description says, and a stream that encodes it its own way
+    hands the client a parse error instead of a tool list. stderr goes the same way, so that
+    a diagnostic is readable rather than mangled.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):  # a stream that cannot be reconfigured
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point: `crackweb-mcp [--binary PATH]` over stdio."""
+    force_utf8()
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
         print(f"crackweb-mcp {__version__}")
