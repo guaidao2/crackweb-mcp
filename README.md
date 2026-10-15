@@ -43,7 +43,7 @@ cursor. A caller that never thinks to ask still sees that something arrived.
 ## Install
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.0
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.1
 # from a checkout:
 pip install .
 ```

@@ -5,4 +5,4 @@ call, and takes care of the shell quoting, the process lifetime and the parsing 
 output on the way.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
