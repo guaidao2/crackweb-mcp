@@ -56,7 +56,7 @@ def test_scan_passes_every_shared_flag_it_was_given(
 ) -> None:
     tools.scan(
         registry,
-        Target(url="http://example.com/?q=1", method="POST", data="a=1", api_docs=["/openapi.json"]),
+        Target(url="http://example.com/?q=1", method="POST", data="a=1"),
         RequestOptions(
             checks="sqli,injection",
             enable_unsafe=True,
@@ -109,7 +109,6 @@ def test_scan_passes_every_shared_flag_it_was_given(
     assert sent["--url"] == ["http://example.com/?q=1"]
     assert sent["--method"] == ["POST"]
     assert sent["--data"] == ["a=1"]
-    assert sent["--api-doc"] == ["/openapi.json"]
     for bare in (
         "--enable-unsafe-checks", "--insecure", "--random-ua", "--no-normalize",
         "--verbose", "--no-waf", "--no-assume-waf",
@@ -153,6 +152,7 @@ def test_crawl_passes_its_own_flags(
         scope=["example.com", "*.example.com"],
         no_discovery=True,
         allow_state_change=True,
+        api_docs=["/openapi.json"],
     )
     sent = flags(argv_log()[0])
     assert sent["--depth"] == ["3"]
@@ -162,6 +162,21 @@ def test_crawl_passes_its_own_flags(
     assert "--no-discovery" in sent
     assert "--allow-state-change" in sent
     assert sent["--checks"] == ["dom-xss"]
+    assert sent["--api-doc"] == ["/openapi.json"]
+
+
+def test_a_global_flag_is_spelled_the_way_the_cli_defines_it(
+    fake_crackweb: object, registry: Registry, argv_log
+) -> None:
+    # crackweb defines --quiet and not -q. The stand-in ignores what it does not know, which
+    # is why the spelling itself is asserted here — a real binary said so the hard way.
+    tools.scan(registry, Target(url="http://example.com"), RequestOptions())
+    assert "--quiet" in argv_log()[0]
+    assert "-q" not in argv_log()[0]
+
+    tools.crawl(registry, Target(url="http://example.com"), RequestOptions())
+    assert "--quiet" in argv_log()[-1]
+    assert "-q" not in argv_log()[-1]
 
 
 def test_a_failure_is_reported_with_what_the_cli_said(

@@ -106,7 +106,6 @@ def build_server(registry: Registry | None = None) -> MCP_Server:
         method: str | None = None,
         data: str | None = None,
         forms: bool = False,
-        api_docs: list[str] | None = None,
         checks: str | None = None,
         enable_unsafe: bool = False,
         sessions: list[str] | None = None,
@@ -138,7 +137,7 @@ def build_server(registry: Registry | None = None) -> MCP_Server:
     ) -> dict:
         return tools.scan(
             registry,
-            Target(url=url, raw=raw, method=method, data=data, forms=forms, api_docs=api_docs),
+            Target(url=url, raw=raw, method=method, data=data, forms=forms),
             _options(
                 checks=checks, enable_unsafe=enable_unsafe, sessions=sessions, cookies=cookies,
                 headers=headers, basic_auth=basic_auth, jwt_secrets=jwt_secrets, proxy=proxy,
@@ -205,7 +204,7 @@ def build_server(registry: Registry | None = None) -> MCP_Server:
     ) -> dict:
         return tools.crawl(
             registry,
-            Target(url=url, api_docs=api_docs),
+            Target(url=url),
             _options(
                 checks=checks, enable_unsafe=enable_unsafe, sessions=sessions, cookies=cookies,
                 headers=headers, basic_auth=basic_auth, jwt_secrets=jwt_secrets, proxy=proxy,
@@ -221,6 +220,7 @@ def build_server(registry: Registry | None = None) -> MCP_Server:
             engine=engine,
             max_pages=max_pages,
             scope=scope,
+            api_docs=api_docs,
             no_discovery=no_discovery,
             allow_state_change=allow_state_change,
             timeout_s=timeout_s,

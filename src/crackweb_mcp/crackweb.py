@@ -202,7 +202,6 @@ class Target:
     method: str | None = None
     data: str | None = None
     forms: bool = False
-    api_docs: object = field(default=None)
 
     def args(self) -> list[str]:
         out: list[str] = []
@@ -211,7 +210,6 @@ class Target:
         out += _flag("--method", self.method)
         out += _flag("--data", self.data)
         out += _flag("--forms", self.forms)
-        out += _repeat("--api-doc", self.api_docs)
         return out
 
 
@@ -304,7 +302,9 @@ def one_shot(command: str, args: list[str], timeout: float, report_copy: str | N
 
 def scan(options: RequestOptions, target: Target, timeout: float = DEFAULT_TIMEOUT) -> dict:
     """`crackweb scan`, with every flag that command takes."""
-    args = ["scan", "-q", *target.args(), *options.args()]
+    # --quiet spelled out, and the same everywhere below: the short -q is not defined, and a
+    # stand-in that ignores unknown flags hides that — it took a real binary to say so.
+    args = ["scan", "--quiet", *target.args(), *options.args()]
     return one_shot("scan", args, timeout, report_copy=options.report_path)
 
 
@@ -315,16 +315,18 @@ def crawl(
     engine: str | None = None,
     max_pages: int | None = None,
     scope: object = None,
+    api_docs: object = None,
     no_discovery: bool = False,
     allow_state_change: bool = False,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> dict:
     """`crackweb crawl`, with every flag that command takes."""
-    args = ["crawl", "-q", *target.args()]
+    args = ["crawl", "--quiet", *target.args()]
     args += _flag("--depth", depth)
     args += _flag("--engine", engine)
     args += _flag("--max-pages", max_pages)
     args += _repeat("--scope", scope)
+    args += _repeat("--api-doc", api_docs)
     args += _flag("--no-discovery", no_discovery)
     args += _flag("--allow-state-change", allow_state_change)
     args += options.args()
