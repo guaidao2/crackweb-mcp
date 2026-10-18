@@ -32,12 +32,12 @@
 ## 安装
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.1
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.2
 # 或者从检出的代码装：
 pip install .
 ```
 
-需要 Python 3.10+、一个 MCP 客户端，以及一个 crackweb 二进制（v1.6.8 以上）；依赖只有 `mcp`。用 `CRACKWEB_BIN` 指定二进制，或者把 `crackweb` 放进 `PATH`。
+需要 Python 3.10+、一个 MCP 客户端，以及一个 crackweb 二进制（v2.0.0 以上；本 wrapper 面向的 CLI 接口自 v1.6.8 起保持稳定）；依赖只有 `mcp`。用 `CRACKWEB_BIN` 指定二进制，或者把 `crackweb` 放进 `PATH`。
 
 ### 什么都不装，直接跑
 

@@ -43,13 +43,14 @@ cursor. A caller that never thinks to ask still sees that something arrived.
 ## Install
 
 ```sh
-pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.1
+pipx install git+https://github.com/guaidao2/crackweb-mcp@v0.3.2
 # from a checkout:
 pip install .
 ```
 
-Needs Python 3.10+, an MCP client, and a crackweb binary (v1.6.8 or later). `mcp` is the
-only dependency. Point at the binary with `CRACKWEB_BIN`, or put `crackweb` on `PATH`.
+Needs Python 3.10+, an MCP client, and a crackweb binary (v2.0.0 or later; the CLI
+surface this wrapper targets has been stable since v1.6.8). `mcp` is the only dependency.
+Point at the binary with `CRACKWEB_BIN`, or put `crackweb` on `PATH`.
 
 ### Running it without installing anything
 
