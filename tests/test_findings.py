@@ -31,6 +31,23 @@ def test_a_line_that_is_not_a_finding_is_ignored() -> None:
     assert findings.parse(text) == []
 
 
+def test_the_replay_command_is_kept_whole() -> None:
+    # crackweb prints the request that reproduces a finding under a `curl:` label, and the
+    # command contains colons of its own — a URL. The field is read by its label, so the value
+    # arrives complete rather than being split at the scheme.
+    text = (
+        "[High] Path traversal / local file inclusion  path-traversal\n"
+        "    GET http://example.com/?page=login\n"
+        "    Payload: php://filter/convert.base64-encode/resource=index\n"
+        "    curl: curl -i -sS -X GET 'http://example.com/?page=php%3A%2F%2Ffilter%2Fresource%3Dindex'\n"
+        "\n"
+    )
+    parsed = findings.parse(text)
+    assert len(parsed) == 1
+    assert parsed[0]["fields"]["curl"].startswith("curl -i -sS -X GET ")
+    assert parsed[0]["fields"]["payload"] == "php://filter/convert.base64-encode/resource=index"
+
+
 def test_colour_codes_do_not_hide_a_finding() -> None:
     text = "\x1b[31m[High]\x1b[0m Something found  sqli\n"
     parsed = findings.parse(text)
